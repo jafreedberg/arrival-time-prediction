@@ -1,5 +1,7 @@
 # Arrival Time Prediction
 
+## STATS 170B Capstone
+
 
 Below is the code for every aspect of our project.
 
@@ -22,14 +24,18 @@ Below is the code for every aspect of our project.
 - stats170svm800.ipynb: This file contains the code to model the support vector machines.
 
 - svm.joblib: This file contains the trained support vector machine model.
+
+- gtfs-realtime-pb2.py: Reference file for to parse GTFS realtime protobuffer format
+
+- pull-vehicle-locations.py & main.py: Pulls GTFS RT data from AC Transit API and converts it to pandas dataframe, inserts to local database
  
 ## Notebooks to Run
 
 - Linear Modeling Demo.Rmd This takes you through the linear modeling procecures for route 800. This notebook should install all required dependencies
 
-- SVM/NN Notebook.ipynb: Dependencies: pytorch, sklearn, matplotlib, seaborn, pandas, and numpy
+- SVM-NN Demo.ipynb: Dependencies: pytorch, sklearn, matplotlib, seaborn, pandas, and numpy
               
-     - SVMDemo.ipynb: This file contains the support vector machine demo. It uses the trained model provided in svm.joblib and predicts the delay of route 800.
+     - This file contains the support vector machine demo. It uses the trained model provided in svm.joblib and predicts the delay of route 800.
 
 ## Pre Run Notebooks
 
