@@ -24,8 +24,6 @@ Below is the code for every aspect of our project.
 - svm.joblib: This file contains the trained support vector machine model.
 
 - SVMDemo.ipynb: This file contains the support vector machine demo. It uses the trained model provided in svm.joblib and predicts the delay of route 800.
-
-- SVMDemo.html: This file contains a version of SVMDemo.ipynb that has been run and includes the output of the model.
  
 ## Notebooks to Run
 
@@ -36,3 +34,5 @@ Below is the code for every aspect of our project.
 ## Pre Run Notebooks
 
 - project-R.html: Pre run version of "Linear Modeling Demo.Rmd"
+
+- SVMDemo.html: Pre run version of "SVMDemo.ipynb"
