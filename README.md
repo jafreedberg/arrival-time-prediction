@@ -19,6 +19,13 @@ Below is the code for every aspect of our project.
 
 - NN-modeling.ipynb: This file contains the code for the neural network structure
 
+- stats170svm800.ipynb: This file contains the code to model the support vector machines.
+
+- svm.joblib: This file contains the trained support vector machine model.
+
+- SVMDemo.ipynb: This file contains the support vector machine demo. It uses the trained model provided in svm.joblib and predicts the delay of route 800.
+
+- SVMDemo.html: This file contains a version of SVMDemo.ipynb that has been run and includes the output of the model.
  
 ## Notebooks to Run
 
