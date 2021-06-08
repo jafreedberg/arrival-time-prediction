@@ -19,7 +19,7 @@ Below is the code for every aspect of our project.
 
 - model2.pth: This file is the trained nearal network model
 
-- NN-modeling.ipynb: This file contains the code for the neural network structure
+- NN-modeling.ipynb: This file contains the code for the neural network structure and visualization (Distribution of Accuracy $ confusion matrix)
 
 - stats170svm800.ipynb: This file contains the code to model the support vector machines.
 
