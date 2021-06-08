@@ -1,0 +1,602 @@
+---
+title: "Data Processing"
+author: "Julian Freedberg"
+date: "5/13/2021"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+Loading Required Packages and checking dependencies
+```{r message = F}
+list.of.packages <- c("tidyverse", "Rcpp", "lubridate")
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+library(tidyverse)
+library(vroom)
+library(Rcpp)
+library(lubridate)
+sourceCpp("going_backwards.cpp")
+sourceCpp("identify_trips.cpp")
+```
+
+Reading in Data
+```{r message = F}
+vp_raw <- vroom("data/vehicle-positions-15sec.csv", delim = ",")
+stop_status <- tibble(current_status= c(0,1,2),
+                      status = c("incoming", "stopped", "in transit"))
+stops <- mutate(vroom("data/gtfs-2/stops.txt", delim = ","),
+                   version = "2103SP")
+
+
+#Trips from GTFS Static
+trips <- vroom("data/gtfs-2/trips.txt", delim = ",")
+
+calendar = vroom("data/gtfs-2/calendar.txt")
+
+stop_times <- vroom("data/gtfs-2/stop_times.txt")
+
+dstops = stops %>% 
+  select(stop_name, stop_lat, stop_lon) %>% 
+  distinct()
+
+shapes <- vroom("data/gtfs-2/shapes.txt")
+avg_speed <- vroom("data/avgSpeedTemp.csv") %>% 
+  group_by(trip_id) %>% 
+  mutate(prevAvg = case_when(is.na(prevAvg) ~ mean(prevAvg, na.rm = T),
+                             T ~ prevAvg)) %>% 
+  select(-1)
+```
+
+```{r}
+t0 <- vp_raw %>% 
+  arrange(vehicle_id, timestamp) %>% 
+    mutate(ts = as.POSIXct(timestamp, origin="1970-01-01")) %>% 
+  filter(ts >= "2021-04-23") %>% 
+  filter(!is.na(route_id))
+```
+
+```{r}
+unique_routes = unique(t0$route_id)
+```
+
+
+```{r}
+vp_clean <- tibble()
+
+
+```
+
+```{r}
+for(r in unique_routes){
+  
+
+
+  print(paste("Route", r))
+  
+t1 <-  t0 %>% filter(route_id == r)
+
+## joining GTFS static information anda creating unique identifier for each recordwrite
+t2<-  t1 %>% 
+  inner_join(stop_status) %>% 
+  inner_join(stops) %>% 
+  left_join(stop_times) %>% 
+  relocate(vehicle_id, stop_id, ts, status, stop_name) %>% 
+  select(vehicle_id, ts,stop_name, status,stop_sequence,route_id, trip_id, occupancy_status, latitude,
+         longitude, stop_lat, stop_lon, speed, timestamp, arrival_time) %>% 
+  distinct() %>% 
+  mutate(id = 1:n()) %>% 
+  relocate(id, speed)
+
+
+## identifying records where the bus is moving to the wrong stop
+t2 <- t2 %>%
+  bind_cols(going_backwards(t2)) %>% 
+  select(-`status...6`) %>% 
+  rename(status = status...18)
+
+
+# fixing records where the bus is moving to the wrong stop
+t4 <- t2 %>% 
+  filter(backwards == 1) %>%
+  select(-stop_lat, -stop_name, - stop_lon, -arrival_time) %>% 
+  inner_join(stop_times %>%                
+               inner_join(stops %>% 
+                      select(stop_id, stop_name, stop_lon, stop_lat)) %>% 
+               select(stop_name, trip_id, stop_lat, stop_lon, stop_sequence) %>% 
+               mutate(stop_sequence = stop_sequence + 1)
+  , by = c("trip_id", "stop_sequence")) %>% 
+  mutate(stop_sequence = stop_sequence - 1)
+
+# combining good and fixed records where the bus was moving to the wrong stop
+vp = t4%>% 
+  bind_rows(t2 %>% filter(backwards == 0)) %>% 
+  arrange(vehicle_id, ts) %>% 
+  select(-arrival_time) %>% 
+  inner_join(stop_times %>% select(trip_id, arrival_time, stop_sequence)) %>%
+  group_by(vehicle_id, ts) %>% 
+  filter(stop_sequence == min(stop_sequence)) %>% 
+  filter(id == min(id)) %>% 
+  ungroup() %>% 
+  mutate(status = case_when(speed != 0  & status == "stopped" ~ "incoming",
+                            T ~ status)) %>% 
+  arrange(vehicle_id, ts)
+
+#identifying trips on a daily basis by vehicle
+vp <- vp %>% bind_cols(identify_trips(vp))
+
+
+#filtering for trip service that has more than 10 time points
+mini_service <- vp %>% group_by(service) %>% summarize(total = n()) %>% 
+  filter(total > 10)
+
+vp <- vp %>% inner_join(mini_service %>% select(service))
+
+lat_lon_dist = function(latitude, longitude, stop_lat, stop_lon){
+  phi1 = latitude * pi /180
+   phi2 = stop_lat * pi / 180
+   dphi = (stop_lat - latitude) * pi / 180
+   dlambda = (stop_lon - longitude) * pi / 180
+   a = sin(dphi/2) ^2 + cos(phi1) * cos(phi2) * sin(dlambda)^2
+   b  = 2 * atan2(sqrt(a), sqrt(1 - a))
+   dist_to_stop = 6371e3 * b
+   return(dist_to_stop)
+}
+
+vp <- vp %>% 
+  mutate(dist_to_stop = lat_lon_dist(latitude, longitude, stop_lat, stop_lon))
+  
+
+
+#finding the last time point where the bus is either going to the 
+# stop or the first time point where a bus is stopped at a stop
+arrival_times <- vp %>% 
+  group_by(vehicle_id, trip_id, stop_name, service, stop_sequence) %>%
+  summarize(arr_time = max(ts),
+            .groups = "drop") %>% 
+  inner_join(vp %>% select(status, vehicle_id, ts), 
+             by = c("vehicle_id", "arr_time" = "ts")) %>% 
+  filter(status != "stopped") %>% 
+  select(-status) %>%
+  mutate(Status = "In Transit") %>% 
+  bind_rows(
+    vp %>% 
+      filter(status == "stopped") %>% 
+      group_by(vehicle_id, trip_id, stop_name, service, stop_sequence) %>% 
+      summarize(arr_time = min(ts),
+                .groups = "drop") %>% 
+    mutate(Status = "Stopped")
+) %>% 
+  arrange(service, arr_time) %>% 
+  group_by(vehicle_id, trip_id, service, stop_sequence) %>% 
+  filter(arr_time == max(arr_time)) %>% 
+  inner_join(vp %>% select(trip_id, vehicle_id, ts,dist_to_stop), by = c("trip_id", "arr_time" = "ts", "vehicle_id"))
+
+# using GTFS static to find the scheduled speed between every stop
+speeds_to_stop = inner_join(stop_times, 
+           stop_times %>% 
+             mutate(stop_sequence = stop_sequence - 1),
+           by = c("trip_id", "stop_sequence")) %>% 
+  mutate(dist_to_stop = shape_dist_traveled.y - shape_dist_traveled.x,
+         time_to_stop = as.numeric(arrival_time.y - arrival_time.x),
+         sched_speed = dist_to_stop/time_to_stop) %>% 
+  select(trip_id, stop_id.y, stop_sequence, dist_to_stop, time_to_stop, sched_speed) %>% 
+  rename(stop_id = stop_id.y) %>%
+  inner_join(stops %>% select(stop_id, stop_name)) %>% 
+  mutate(stop_sequence = stop_sequence + 1) %>% 
+  mutate(sched_speed = case_when(is.na(sched_speed) ~ mean(sched_speed, na.rm = T),
+                                 T  ~ sched_speed))
+
+# calculating the mean speed to filter for missing values
+mu <- mean(speeds_to_stop$sched_speed, na_rm = T)
+
+# adjusting the stop arrival time to account for the remaining distance to the stop
+arrival_times <- arrival_times %>% 
+  left_join(speeds_to_stop %>% select(-dist_to_stop, -time_to_stop,-stop_id)) %>% 
+  mutate(sched_speed = case_when(is.na(sched_speed) ~ mu,
+                                 T  ~ sched_speed)) %>% 
+  select(-dist_to_stop)
+
+
+# calculating the dwell time for each stop
+vp <- vp %>% 
+  inner_join(arrival_times) %>% 
+  mutate(dwell_time = case_when(status == "stopped" ~as.numeric( ts - arr_time),
+                                T ~ 0)) %>% 
+  mutate(delay = arr_time - ts) 
+
+# selecting service that goies to multiple stops
+vp <- vp %>% mutate(delay = as.numeric(delay))
+
+good_service = vp %>% 
+  select(service, stop_sequence) %>%
+  distinct() %>% 
+  group_by(service) %>% 
+  summarize(total = n()) %>% 
+  filter(total > 2) %>% 
+  select(service)
+
+vp = vp %>% inner_join(good_service)
+
+
+vp <- vp %>% 
+  mutate(weekday = wday(ts),
+         time_of_day = case_when(hour(ts) < 6 ~ "Nighttime",
+                                 hour(ts) < 9 & hour(ts) >= 7 ~ "Morning Peak",
+                                 hour(ts) >= 9 & hour(ts) < 15 ~ "Midday",
+                                 hour(ts) >= 15 & hour(ts) < 18.5 ~ "Evening Peak",
+                                 T ~ "Nighttime")) %>% 
+  mutate(min_to_stop = floor(delay/60))
+
+
+
+
+vp_clean = bind_rows(vp_clean, vp)
+
+}
+  
+vp_clean = vp_clean %>% 
+  mutate(delay = delay - seconds(second_modifier))
+  mutate(delay = case_when(status == "stopped" ~ 0,
+                           T ~ delay)) %>% 
+  mutate(min_to_stop = floor(delay/60))
+  
+vp_clean = vp_clean %>% 
+  group_by(service, route_id, stop_name) %>%
+  summarize(delay_max = max(delay),
+            delay_min = min(delay)) %>% 
+  filter(delay_max < 1000,
+         delay_min >= 0) %>% 
+  select(-delay_min, -delay_max) %>% 
+  inner_join(vp_clean) %>% 
+  ungroup()
+  
+```
+
+```{r}
+
+vp_clean = vp_clean %>% 
+  mutate(delay = delay - as.numeric(seconds(second_modifier))) %>% 
+  mutate(delay = case_when(status == "stopped" ~ 0,
+                           T ~ delay)) %>% 
+  mutate(min_to_stop = floor(delay/60)) %>% 
+  filter(delay >= 0) 
+
+vp_clean = vroom("data/vp_clean_k_prev_busses.csv") %>% 
+  mutate(id = 1:n()) %>% 
+  filter(route_id %in% c("O", "65"))
+
+
+
+```
+
+
+```{r}
+vp_clean <- vp_clean %>% 
+  group_by(service, route_id, vehicle_id) %>% 
+  summarize(max_delay = max(delay),
+            min_delay = min(delay)) %>% 
+  filter(max_delay < 1000,
+         min_delay >= 0) %>% 
+  select(-max_delay, -min_delay) %>% 
+  inner_join(vp_clean) %>% 
+  filter(!is.na(delay) || !is.na(dist_to_stop)) %>% 
+  ungroup()
+
+vp_clean <- vp_clean %>% 
+  group_by(route_id, service) %>%
+  summarize(corr = cor(delay, dist_to_stop)) %>% 
+  ungroup() %>% 
+  filter(!is.na(corr)) %>% 
+  filter(corr > 0.2) %>% 
+  select(-corr) %>% 
+  inner_join(vp_clean)
+
+vp_clean <- vp_clean %>% left_join(avg_speed) %>% 
+  mutate(prevAvg = case_when(is.na(prevAvg)  ~ mean(prevAvg, na.rm = T),
+                             T  ~ prevAvg))
+
+tst = vp_clean %>%
+  select(-c(latitude, longitude, timestamp, backwards, status, stop_lon, stop_lat, shape_pt_lat, shape_dist_traveled, l2_dist, stop_dist, second_modifier, shape_pt_sequence,shape_pt_lon, shape_id, Status, arrival_time, arr_time, ts, vehicle_id, service, trip_id, , stop_sequence, min_to_stop, id)) 
+
+route_O = tst %>% sample_n(100000)%>% 
+  mutate(weekday = as.factor(weekday))
+
+cor_mat = as.data.frame(model.matrix(delay ~ dist_to_stop * sched_speed + time_of_day +   prevAvg +  weekday, data = route_O)) %>% 
+  mutate(delay = route_O$delay) %>% 
+select(-`(Intercept)`) %>% 
+  relocate(delay)
+cor_O = cor(cor_mat)
+ggcorrplot(cor_O,lab = T)
+
+
+  
+```
+
+
+```{r}
+set.seed(12345)
+
+unique_routes = unique(vp_clean$route_id)
+
+r2_train = c()
+r2_test = c()
+route = c()
+mse_test = c()
+fold = c()
+test_df = tibble()
+trained = F
+n_folds = 3
+
+len = length(unique_routes)
+for(i in 1:(length(unique_routes))){
+
+  r = unique_routes[i]
+    print(paste("Route:", r))
+    
+  #filtering rows that are far from the route shape
+  vp <- vp_clean %>% filter(route_id == r) 
+  
+  #randomizing order of dataset 
+  vp = vp %>% 
+    sample_n(dim(vp)[1]) 
+  
+  #setting breaks for cross validation
+  n = dim(vp)[1]
+  if(n < 200){
+    next
+  }
+  
+  tbreak = c(0, floor(n * 0.2), floor(n * 0.4), floor(n * 0.6), floor(n * 0.6), n)
+  
+  # 5 fold cross validation
+  for(j in 1:n_folds){
+    if(trained == T){
+      next
+    }
+    #splitting into testing and training dataset
+    test = vp %>% slice(tbreak[j]:tbreak[j + 1])
+    test_stops = test %>% select(stop_name) %>% distinct()
+
+    train = vp %>% anti_join(test %>% select(id), by = c("id"))
+    
+    train_stops= train  %>% select(stop_name) %>% distinct()
+    if(dim(test_stops)[1] != dim(test_stops %>% inner_join(train_stops, by = "stop_name"))[1]){
+      next
+    }
+    else{
+      trained = T
+    }
+    
+   
+   if(length(unique(train$time_of_day)) == 1){
+     train$time_of_day = sample(c(train$time_of_day[1],"2"), dim(train)[1], replace = T)
+   }
+    trained = F
+   
+    reg = lm(delay ~ dist_to_stop * sched_speed  * time_of_day * prevAvg+ stop_name + as.factor(weekday), data = train)
+    
+    #assinging variable
+    assign(paste("reg", r, sep = "_"),reg)
+    
+    yhat = predict(reg, test)
+    
+    #adding predictions to test dataset
+    test <- test %>% 
+      mutate(yhat = yhat) 
+    test_df <- bind_rows(test_df, test)
+    
+    yhat_train = predict(reg, train)
+    
+    
+    #storing training error
+    r2_train[j + (i - 1) * n_folds] <- cor(train$delay, yhat_train)^2
+    
+    print(r)
+    print("Train RMSE")
+    print(sqrt(sum((train$delay - yhat_train)^2)/dim(train)[1]))
+    print("Train Accuracy")
+    print(sum((floor(train$delay/60) - floor(yhat_train/60)) == 0)/dim(train)[1])
+    print("Test Accuracy")
+    print(sum((floor(test$delay/60) - floor(yhat/60)) == 0)/dim(test)[1])
+    
+    #storing rotue
+    route[j + (i - 1) * n_folds] <- r
+    mse_test[j + (i - 1) * n_folds] <- test %>% mutate(se = (yhat - delay) ^ 2 ) %>% 
+      summarize(mse = mean(se)) %>% pull()
+    r2_test[j + (i - 1) * n_folds] <- cor(test$delay, test$yhat)^2
+    fold[j + (i - 1) * n_folds] = j
+    
+  }
+
+}
+
+
+test %>% 
+  mutate(diff = floor((delay - yhat)/60)) %>% 
+  ggplot(aes(x = diff)) + 
+  geom_histogram(color = "white", breaks = seq(-5,13,1) - 0.011) + 
+  labs(x = "Delay - Predicted Arrival (Minutes)",
+       title = "Route O: Distribution of Residuals",
+       y = "Number of Observations") +
+  scale_x_continuous(breaks = seq(-5,13,1)) 
+
+model_results = tibble(route, r2_train, r2_test, mse_test, fold) %>% 
+  mutate(rmse = sqrt(mse_test))
+
+m2 <- vp_clean %>% 
+  group_by(route_id) %>% 
+  summarize(total = n()) %>% 
+  filter(total > 1000) %>% 
+  inner_join(model_results, by = c("route_id" = "route")) %>% 
+  arrange(r2_test)
+m2 %>% 
+  group_by(route_id) %>% 
+  summarize_at(.vars = c("r2_train", "total", "r2_test", "mse_test", "rmse"),
+               .funs = mean) %>% 
+  arrange(r2_test) %>% 
+  view()
+vp_clean %>% 
+  group_by(route_id) 
+  
+
+  ggplot(model_results,aes(x = r2_test)) +
+  geom_histogram(binwidth = 0.2, breaks = (1:10)/10, color = "white") +
+  labs(x = "R-Squared of Test Data",
+       y = "Number of Routes",
+       title = "Test R-Squared for Every Route") + 
+  scale_x_continuous(breaks = (1:10)/10)
+
+r2_edit %>%   ggplot(aes(x = r2_test)) +
+  geom_histogram(binwidth = 0.2, breaks = (1:10)/10, color = "white") +
+  labs(x = "R-Squared of Test Data",
+       y = "Number of Routes",
+       title = "Test R-Squared for Every Route") + 
+  scale_x_continuous(breaks = (1:10)/10)
+
+vp_clean <- vp_clean %>% 
+  mutate(minute_to_arrival = floor(delay/60))
+
+vp_clean %>% 
+  sample_n(1000) %>% 
+  ggplot(aes(x = minute_to_arrival)) + 
+  geom_histogram(breaks = c(0,1,2,3,4,5,6,7,8,9,10), color = "white")
+
+m2 %>% 
+  group_by(route_id) %>% 
+  summarize_at(.vars = c("total", "r2_train", "r2_test", "mse_test", "rmse"),
+               .funs = mean)%>% 
+  ungroup() %>% 
+  summary()
+  ggplot(aes(x = r2_test)) + 
+  geom_histogram(binwidth = 0.2, breaks = (1:10)/10, color = "white") +
+  labs(x = "R-Squared of Test Data",
+       y = "Number of Routes",
+       title = "Test R-Squared for Every Route") + 
+  scale_x_continuous(breaks = (1:10)/10) + 
+  theme(text = element_text(size = 20)) %>% 
+  
+```
+
+Model Diagnostics
+```{r}
+tst %>% 
+  slice(1:100) %>% 
+  relocate(delay) %>% 
+  mutate(delay = as.integer(delay)) %>% 
+  view()
+```
+
+
+
+Routes 800 was an issue before we implemented the data cleaning procedures, we 
+```{r}
+route_840 <- vp_clean %>% filter(route_id == "840") %>% arrange(vehicle_id, ts)
+
+route_800 <- vp_clean %>% filter(route_id == "800") %>% arrange(vehicle_id, ts)
+```
+
+
+```{r}
+vp <- route_800
+
+vp %>% 
+  ggplot(aes(x = delay)) +
+  geom_histogram(color= "white") + 
+  labs(x = "Time to Arrival (Seconds)")
+vp = vp %>% 
+  mutate(phi1 = latitude * pi /180,
+         phi2 = shape_pt_lat * pi / 180,
+         dphi = (shape_pt_lat - latitude) * pi / 180,
+         dlambda = (shape_pt_lon - longitude) * pi / 180,
+         a = sin(dphi/2) ^2 + cos(phi1) * cos(phi2) * sin(dlambda)^2,
+         b  = 2 * atan2(sqrt(a), sqrt(1 - a)),
+         gcircle_dist = 6371e3 * b
+         ) %>% 
+  select(-phi1,-phi2,-dphi, - a, -b) %>% 
+  filter(gcircle_dist < 200) %>% 
+  mutate(arr_time = arr_time - seconds(second_modifier)) %>% 
+  mutate(delay = as.numeric(arr_time - ts),
+         min_to_arrival = floor(delay / 60)) %>% 
+  filter(min_to_arrival > 0, min_to_arrival < 151) %>% 
+    filter(dwell_time == 0)
+
+vp %>% 
+  ggplot(aes(x = delay)) +
+  geom_histogram(color= "white") + 
+  labs(x = "Time to Arrival (Seconds)")
+
+arrival_times <-  vp%>% 
+  select(second_modifier,gcircle_dist,stop_name, stop_sequence, trip_id, arr_time, service, vehicle_id, arrival_time, ts)
+  
+view(arrival_times %>% slice(1:100))
+
+reg = lm(min_to_arrival ~ dist_to_stop  * sched_speed, data =vp_clean)
+```
+
+
+
+
+Model diagnostic plots
+```{r}
+
+yhat = predict(reg, test)
+
+test <- test %>% 
+  mutate(yhat = yhat,
+         diff = yhat - delay)
+
+ggplot(test, aes(x = diff/60)) + 
+  geom_histogram(breaks = seq(-17,17,1), color = "white") + 
+  xlim(-17, 17) + 
+  scale_y_continuous(labels = scales::comma_format()) + 
+  scale_x_continuous(breaks = seq(-20,20,5)) + 
+  labs(x = "Predicted - Actual Arrival Time to Arrival (Minutes)",
+       y = "Number of Observations",
+       title = "Distribution of Difference Between Actual and \nPredicted Time to Arrival") + 
+  theme(text = element_text(size = 30))
+
+
+test %>% 
+  mutate(sqdiff = diff * diff) %>% 
+  summarize(mse = sqrt(sum(sqdiff)/n()))
+
+yhat_train = predict(reg, train)
+
+train <- train %>% 
+  mutate(yhat = yhat_train,
+         diff = yhat - delay)
+gg = tibble(x = reg$fitted.values[1:1000], y = reg$residuals[1:1000])
+
+ggplot(gg, aes(x = x, y = y)) + 
+  geom_point(alpha = 0.1, size = 3) + 
+  labs( x = "Fitted Values", y = "Residuals", title = "Fitted Values vs Residuals \n(1000 Sample Points)") + 
+  theme(text = element_text(size = 30))
+  
+
+ggplot(gg,aes(sample = y)) + 
+  stat_qq(alpha = 0.5, size = 3) + stat_qq_line() + 
+  labs(y = "Residuals", x= "Theoretical Quantiles", title = "Normal QQ Plot") + 
+  theme(text = element_text(size = 30))  
+  
+  
+plot(reg2)
+
+
+train %>% 
+  group_by(route_id) %>% 
+  mutate(sqdiff = diff * diff) %>% 
+  summarize(mse = sqrt(sum(sqdiff)/n())) %>% 
+  filter(mse == min(mse) |
+         mse == max(mse))
+```
+
+
+
+
+
+
+679, 672, 628, 649, 682, 840, 660, 662, 653, 606, 652, NX1,  rank deficient

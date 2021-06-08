@@ -1,0 +1,176 @@
+---
+title: "tst"
+author: "Julian Freedberg"
+date: "6/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Linear Modeling
+```{r}
+set.seed(12345)
+
+unique_routes = unique(vp_clean$route_id)
+
+r2_train = c()
+r2_test = c()
+route = c()
+mse_test = c()
+fold = c()
+test_df = tibble()
+trained = F
+n_folds = 3
+
+len = length(unique_routes)
+for(i in 1:(length(unique_routes))){
+
+  r = unique_routes[i]
+    print(paste("Route:", r))
+    
+  #filtering rows that are far from the route shape
+  vp <- vp_clean %>% filter(route_id == r) 
+  
+  #randomizing order of dataset 
+  vp = vp %>% 
+    sample_n(dim(vp)[1]) 
+  
+  #setting breaks for cross validation
+  n = dim(vp)[1]
+  if(n < 200){
+    next
+  }
+  
+  tbreak = c(0, floor(n * 0.2), floor(n * 0.4), floor(n * 0.6), floor(n * 0.6), n)
+  
+  # 5 fold cross validation
+  for(j in 1:n_folds){
+    if(trained == T){
+      next
+    }
+    #splitting into testing and training dataset
+    test = vp %>% slice(tbreak[j]:tbreak[j + 1])
+    test_stops = test %>% select(stop_name) %>% distinct()
+
+    train = vp %>% anti_join(test %>% select(id), by = c("id"))
+    
+    train_stops= train  %>% select(stop_name) %>% distinct()
+    if(dim(test_stops)[1] != dim(test_stops %>% inner_join(train_stops, by = "stop_name"))[1]){
+      next
+    }
+    else{
+      trained = T
+    }
+    
+   
+   if(length(unique(train$time_of_day)) == 1){
+     train$time_of_day = sample(c(train$time_of_day[1],"2"), dim(train)[1], replace = T)
+   }
+    trained = F
+   
+    reg = lm(delay ~ dist_to_stop * sched_speed  * time_of_day * prevAvg+ stop_name + as.factor(weekday), data = train)
+    
+    #assinging variable
+    assign(paste("reg", r, sep = "_"),reg)
+    
+    yhat = predict(reg, test)
+    
+    #adding predictions to test dataset
+    test <- test %>% 
+      mutate(yhat = yhat) 
+    test_df <- bind_rows(test_df, test)
+    
+    yhat_train = predict(reg, train)
+    
+    
+    #storing training error
+    r2_train[j + (i - 1) * n_folds] <- cor(train$delay, yhat_train)^2
+    
+    print(r)
+    print("Train RMSE")
+    print(sqrt(sum((train$delay - yhat_train)^2)/dim(train)[1]))
+    print("Train Accuracy")
+    print(sum((floor(train$delay/60) - floor(yhat_train/60)) == 0)/dim(train)[1])
+    print("Test Accuracy")
+    print(sum((floor(test$delay/60) - floor(yhat/60)) == 0)/dim(test)[1])
+    
+    #storing rotue
+    route[j + (i - 1) * n_folds] <- r
+    mse_test[j + (i - 1) * n_folds] <- test %>% mutate(se = (yhat - delay) ^ 2 ) %>% 
+      summarize(mse = mean(se)) %>% pull()
+    r2_test[j + (i - 1) * n_folds] <- cor(test$delay, test$yhat)^2
+    fold[j + (i - 1) * n_folds] = j
+    
+  }
+
+}
+
+
+test %>% 
+  mutate(diff = floor((delay - yhat)/60)) %>% 
+  ggplot(aes(x = diff)) + 
+  geom_histogram(color = "white", breaks = seq(-5,13,1) - 0.011) + 
+  labs(x = "Delay - Predicted Arrival (Minutes)",
+       title = "Route O: Distribution of Residuals",
+       y = "Number of Observations") +
+  scale_x_continuous(breaks = seq(-5,13,1)) 
+
+model_results = tibble(route, r2_train, r2_test, mse_test, fold) %>% 
+  mutate(rmse = sqrt(mse_test))
+
+m2 <- vp_clean %>% 
+  group_by(route_id) %>% 
+  summarize(total = n()) %>% 
+  filter(total > 1000) %>% 
+  inner_join(model_results, by = c("route_id" = "route")) %>% 
+  arrange(r2_test)
+m2 %>% 
+  group_by(route_id) %>% 
+  summarize_at(.vars = c("r2_train", "total", "r2_test", "mse_test", "rmse"),
+               .funs = mean) %>% 
+  arrange(r2_test) %>% 
+  view()
+vp_clean %>% 
+  group_by(route_id) 
+  
+
+  ggplot(model_results,aes(x = r2_test)) +
+  geom_histogram(binwidth = 0.2, breaks = (1:10)/10, color = "white") +
+  labs(x = "R-Squared of Test Data",
+       y = "Number of Routes",
+       title = "Test R-Squared for Every Route") + 
+  scale_x_continuous(breaks = (1:10)/10)
+
+r2_edit %>%   ggplot(aes(x = r2_test)) +
+  geom_histogram(binwidth = 0.2, breaks = (1:10)/10, color = "white") +
+  labs(x = "R-Squared of Test Data",
+       y = "Number of Routes",
+       title = "Test R-Squared for Every Route") + 
+  scale_x_continuous(breaks = (1:10)/10)
+
+vp_clean <- vp_clean %>% 
+  mutate(minute_to_arrival = floor(delay/60))
+
+vp_clean %>% 
+  sample_n(1000) %>% 
+  ggplot(aes(x = minute_to_arrival)) + 
+  geom_histogram(breaks = c(0,1,2,3,4,5,6,7,8,9,10), color = "white")
+
+m2 %>% 
+  group_by(route_id) %>% 
+  summarize_at(.vars = c("total", "r2_train", "r2_test", "mse_test", "rmse"),
+               .funs = mean)%>% 
+  ungroup() %>% 
+  summary()
+  ggplot(aes(x = r2_test)) + 
+  geom_histogram(binwidth = 0.2, breaks = (1:10)/10, color = "white") +
+  labs(x = "R-Squared of Test Data",
+       y = "Number of Routes",
+       title = "Test R-Squared for Every Route") + 
+  scale_x_continuous(breaks = (1:10)/10) + 
+  theme(text = element_text(size = 20)) %>% 
+  
+```
