@@ -1,7 +1,7 @@
 # Arrival Time Prediction
 
 
-Below is the 
+Below is the code for every aspect of our project.
 
 ## File Descriptions
 
@@ -22,6 +22,10 @@ Below is the
  
 ## Notebooks to Run
 
-- Linear Modeling Notebook.Rmd This takes you through the linear modeling procecures for route 800. This notebook should install all required dependencies
+- Linear Modeling Demo.Rmd This takes you through the linear modeling procecures for route 800. This notebook should install all required dependencies
 
 - Python Notebook: Dependencies: pytorch, sklearn, matplotlib, seaborn, pandas, and numpy
+
+## Pre Run Notebooks
+
+- project-R.html: Pre run version of "Linear Modeling Demo.Rmd"
