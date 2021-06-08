@@ -27,7 +27,7 @@ Below is the code for every aspect of our project.
 
 - Linear Modeling Demo.Rmd This takes you through the linear modeling procecures for route 800. This notebook should install all required dependencies
 
-- SVM/NN Notebook: Dependencies: pytorch, sklearn, matplotlib, seaborn, pandas, and numpy
+- SVM/NN Notebook.ipynb: Dependencies: pytorch, sklearn, matplotlib, seaborn, pandas, and numpy
               
      - SVMDemo.ipynb: This file contains the support vector machine demo. It uses the trained model provided in svm.joblib and predicts the delay of route 800.
 
@@ -35,4 +35,4 @@ Below is the code for every aspect of our project.
 
 - project-R.html: Pre run version of "Linear Modeling Demo.Rmd"
 
-- SVMDemo.html: Pre run version of "SVMDemo.ipynb"
+- project-python.html: Pre run version of "SVM/NN Demo.ipynb"
