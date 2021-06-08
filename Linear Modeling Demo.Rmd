@@ -1,5 +1,5 @@
 ---
-title: "Linear Modelingt"
+title: "Linear Modeling Notebook"
 author: "Julian Freedberg"
 date: "6/8/2021"
 output: html_document
@@ -11,7 +11,9 @@ knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
 
 
 
-Linear Modeling, this code can be adjusted to 
+## Linear Modeling
+
+This code can be adjusted to run for all routes and calculates the R squared and MSE of all the routes and the number of folds used to test the data. We will be using a 80/20 testing training split for this data.  We can adjust the number of folds and the testing trianing split as needed in the code. It also generates some diagnostic charts that we used to evaluate the strength of our results.
 ```{r}
 library(tidyverse)
 library(vroom)
@@ -112,7 +114,14 @@ for(i in 1:(length(unique_routes))){
   }
 
 }
+```
 
+Modeling results
+```{r}
+model_results = tibble(route, mse_test, r2_test, r2_train, fold)
+
+
+knitr::kable(model_results)
 
 test %>% 
   mutate(diff = floor((delay - yhat)/60)) %>% 

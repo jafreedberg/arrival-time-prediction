@@ -1,5 +1,5 @@
 ---
-title: "tst"
+title: "Linear Modeling"
 author: "Julian Freedberg"
 date: "6/8/2021"
 output: html_document
@@ -12,6 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Linear Modeling
 ```{r}
+library(tidyverse)
 set.seed(12345)
 
 unique_routes = unique(vp_clean$route_id)
