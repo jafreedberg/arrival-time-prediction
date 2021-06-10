@@ -35,7 +35,7 @@ Below is the code for every aspect of our project.
 
 - SVM-NN Demo.ipynb: Dependencies: pytorch, sklearn, matplotlib, seaborn, pandas, and numpy
               
-     - This file contains the support vector machine demo. It uses the trained model provided in svm.joblib and predicts the delay of route 800.
+     - This file contains the support vector machine and neural networks demo. It uses both the trained models provided in svm.joblib and model2.pth, and predicts the delay of route 800.
 
 ## Pre Run Notebooks
 
