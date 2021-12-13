@@ -1,6 +1,14 @@
-# Arrival Time Prediction
+# Fixed Route  Arrival Time Prediction
 
-## STATS 170B Capstone
+### UCI Data Science Capstone Capstone
+
+### Julian Freedberg, Jullia Bautista, Shibo Tang
+
+## Project Description
+
+In order to facilitate travel and alleviate traffic pressure, more and more people choose to take public buses as a mode of transportation. As people's demand for buses gradually increases, improving high-quality service has become the most concerning issue of the bus service system. For our project objective, our goal is to implement and evaluate various approaches for stop arrival time prediction for fixed route bus systems and find out which model has the highest accuracy. Accurate bus arrival time predictions is a key component of rider satisfaction with bus service. We believe that by predicting the arrival time, passengers can easily manage their time and daily schedule.
+
+SVM (support vector machines), NN (neural networks), and linear regression are the three models that have the most effect in this field, and our main proposal is to figure out which model has the best performance with lower errors by comparing with the data from AC transit (a large transit agency that provides bus service to Alameda and Contra Costa counties in the Bay Area) to test the accuracy. For our available data resources, we have historical bus arrival times and predictions data which we collected from AC Transit API, General Transit Feed Specification (GTFS) real time (RT) feed and the GTFS static files. GTFS-Real time feed that is updated continuously with operational vehicle information like the vehicle location, speed, next stop, occupancy status, the timestamp, vehicle speed, vehicle bearing, and the trip. GTFS static is a series of csv files containing schedule information like the stop locations and identifiers, as well as the scheduled arrival time which we will use to see whether a vehicle has arrived at a stop.
 
 
 Below is the code for every aspect of our project.
