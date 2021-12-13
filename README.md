@@ -1,6 +1,6 @@
-# Fixed Route  Arrival Time Prediction
+# Fixed Route Bus Arrival Time Prediction
 
-### UCI Data Science Capstone Capstone
+### UCI Data Science Capstone 
 
 ### Julian Freedberg, Jullia Bautista, Shibo Tang
 
